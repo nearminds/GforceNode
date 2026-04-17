@@ -1,0 +1,45 @@
+[workspace]
+members = [
+    "crates/node-core",
+    "crates/node-executor",
+    "crates/node-daemon",
+    "crates/node-cli",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Config
+toml = "0.8"
+
+# IDs and time
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# HTTP client (for registration)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# System info
+sysinfo = "0.32"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# URL handling
+url = "2"
