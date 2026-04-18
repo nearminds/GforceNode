@@ -28,9 +28,7 @@ pub fn resolve_safe_path(requested: &str, sandbox_root: &Path) -> Result<PathBuf
             .canonicalize()
             .context("Failed to canonicalize path")?
     } else {
-        let parent = resolved
-            .parent()
-            .context("Path has no parent")?;
+        let parent = resolved.parent().context("Path has no parent")?;
         if !parent.exists() {
             std::fs::create_dir_all(parent)?;
         }
@@ -77,11 +75,7 @@ pub fn list_files(path: &str, sandbox_root: &Path) -> Result<Vec<String>> {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().to_string();
         let is_dir = entry.file_type()?.is_dir();
-        entries.push(if is_dir {
-            format!("{name}/")
-        } else {
-            name
-        });
+        entries.push(if is_dir { format!("{name}/") } else { name });
     }
 
     entries.sort();

@@ -3,3 +3,4 @@ pub mod commands;
 pub mod config;
 pub mod connection;
 pub mod heartbeat;
+pub mod service;
