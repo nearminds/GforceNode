@@ -80,10 +80,7 @@ pub fn uninstall() -> Result<()> {
 pub fn status() -> Result<String> {
     match Platform::current().context("Unsupported platform")? {
         Platform::Linux => run_capture("systemctl", &["is-active", SERVICE_NAME]),
-        Platform::Macos => run_capture(
-            "launchctl",
-            &["list", "com.nearminds.gforce-node"],
-        ),
+        Platform::Macos => run_capture("launchctl", &["list", "com.nearminds.gforce-node"]),
         Platform::Windows => run_capture("sc.exe", &["query", SERVICE_NAME]),
     }
 }
@@ -136,8 +133,7 @@ fn uninstall_systemd() -> Result<()> {
 
 // ── launchd (macOS) ────────────────────────────────────────────────────────
 
-const LAUNCHD_PLIST_PATH: &str =
-    "/Library/LaunchDaemons/com.nearminds.gforce-node.plist";
+const LAUNCHD_PLIST_PATH: &str = "/Library/LaunchDaemons/com.nearminds.gforce-node.plist";
 
 fn launchd_plist(daemon_path: &Path) -> String {
     format!(
@@ -268,9 +264,7 @@ mod tests {
     fn launchd_plist_contains_daemon_path() {
         let plist = launchd_plist(Path::new("/usr/local/bin/gforce-node-daemon"));
         assert!(plist.contains("com.nearminds.gforce-node"));
-        assert!(plist.contains(
-            "<string>/usr/local/bin/gforce-node-daemon</string>"
-        ));
+        assert!(plist.contains("<string>/usr/local/bin/gforce-node-daemon</string>"));
         assert!(plist.contains("<key>KeepAlive</key>"));
     }
 
@@ -280,10 +274,7 @@ mod tests {
         if cfg!(windows) {
             assert!(p.to_string_lossy().ends_with("gforce-node-daemon.exe"));
         } else {
-            assert_eq!(
-                p,
-                PathBuf::from("/usr/local/bin/gforce-node-daemon")
-            );
+            assert_eq!(p, PathBuf::from("/usr/local/bin/gforce-node-daemon"));
         }
     }
 }

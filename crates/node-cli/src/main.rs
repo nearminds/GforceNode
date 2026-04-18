@@ -94,9 +94,7 @@ async fn main() -> Result<()> {
 
         Commands::Install { daemon } => cmd_install(daemon)?,
 
-        Commands::Uninstall { remove_workspaces } => {
-            cmd_uninstall(remove_workspaces)?
-        }
+        Commands::Uninstall { remove_workspaces } => cmd_uninstall(remove_workspaces)?,
     }
 
     Ok(())
@@ -108,8 +106,7 @@ async fn cmd_register(server: &str, token: &str, use_tls: bool) -> Result<()> {
     println!("Enrolling with Gforce server: {server}");
 
     let sys_info = node_executor::system::collect_system_info();
-    let config =
-        node_core::auth::register_node(server, token, sys_info, use_tls).await?;
+    let config = node_core::auth::register_node(server, token, sys_info, use_tls).await?;
 
     println!("Enrolment successful!");
     println!("  Server:    {}", config.server);
@@ -129,7 +126,10 @@ fn cmd_status() {
         Ok(config) => {
             println!("Gforce Node Agent");
             println!("  Server:       {}", config.server);
-            println!("  Node id:      {}", config.node_id.as_deref().unwrap_or("—"));
+            println!(
+                "  Node id:      {}",
+                config.node_id.as_deref().unwrap_or("—")
+            );
             println!("  Workspace:    {}", config.workspace_root);
             println!(
                 "  TLS:          {}",

@@ -54,7 +54,9 @@ fn u32_from_u64(sys: &Value, key: &str) -> Option<u32> {
 }
 
 fn u32_from_f64(sys: &Value, key: &str) -> Option<u32> {
-    sys.get(key).and_then(|v| v.as_f64()).map(|n| n.round() as u32)
+    sys.get(key)
+        .and_then(|v| v.as_f64())
+        .map(|n| n.round() as u32)
 }
 
 /// Perform enrollment and persist the resulting config. The server
@@ -122,9 +124,7 @@ pub async fn register_node(
     };
 
     config.save().context("Failed to save config")?;
-    tracing::info!(
-        "Node enrolled successfully. Config saved to ~/.gforce-node/config.toml"
-    );
+    tracing::info!("Node enrolled successfully. Config saved to ~/.gforce-node/config.toml");
 
     Ok(config)
 }

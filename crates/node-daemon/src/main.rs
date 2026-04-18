@@ -54,9 +54,8 @@ async fn main() -> Result<()> {
     // Ensure workspace root exists so the (future) executor can write to it.
     let workspace_root = PathBuf::from(&config.workspace_root);
     if !workspace_root.exists() {
-        std::fs::create_dir_all(&workspace_root).with_context(|| {
-            format!("creating workspace root {}", workspace_root.display())
-        })?;
+        std::fs::create_dir_all(&workspace_root)
+            .with_context(|| format!("creating workspace root {}", workspace_root.display()))?;
     }
 
     // Block on the heartbeat loop until the server permanently rejects us

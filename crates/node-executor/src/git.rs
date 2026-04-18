@@ -22,10 +22,7 @@ pub async fn clone(
 }
 
 /// Pull latest changes in a repository.
-pub async fn pull(
-    repo_path: &Path,
-    output_tx: mpsc::Sender<OutputLine>,
-) -> Result<CommandResult> {
+pub async fn pull(repo_path: &Path, output_tx: mpsc::Sender<OutputLine>) -> Result<CommandResult> {
     run_command("git pull", Some(repo_path), output_tx, 120).await
 }
 

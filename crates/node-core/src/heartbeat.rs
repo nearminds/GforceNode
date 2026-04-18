@@ -53,10 +53,7 @@ fn build_url(config: &NodeConfig) -> String {
 }
 
 /// Send a single heartbeat.
-pub async fn send_once(
-    client: &reqwest::Client,
-    config: &NodeConfig,
-) -> HeartbeatOutcome {
+pub async fn send_once(client: &reqwest::Client, config: &NodeConfig) -> HeartbeatOutcome {
     let url = build_url(config);
     let body = HeartbeatBody {
         agent_version: Some(env!("CARGO_PKG_VERSION")),
@@ -109,9 +106,7 @@ pub async fn run_heartbeat_loop(config: NodeConfig) -> Result<()> {
                 tracing::warn!(code, "heartbeat server error — will retry");
             }
             HeartbeatOutcome::Unauthorized => {
-                tracing::error!(
-                    "heartbeat rejected with 401 — node token revoked; stopping"
-                );
+                tracing::error!("heartbeat rejected with 401 — node token revoked; stopping");
                 anyhow::bail!("node token rejected by server (401)");
             }
         }
