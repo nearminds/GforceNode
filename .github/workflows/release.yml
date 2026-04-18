@@ -15,15 +15,27 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             platform: linux-x86_64
+            archive: tar.gz
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             platform: linux-aarch64
+            archive: tar.gz
           - target: x86_64-apple-darwin
             os: macos-latest
             platform: darwin-x86_64
+            archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
             platform: darwin-aarch64
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            platform: windows-x86_64
+            archive: zip
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            platform: windows-aarch64
+            archive: zip
 
     runs-on: ${{ matrix.os }}
 
@@ -44,18 +56,29 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package
+      - name: Package (tar.gz — unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/gforce-node dist/
           cp target/${{ matrix.target }}/release/gforce-node-daemon dist/
           cd dist && tar -czf ../gforce-node-${{ matrix.platform }}.tar.gz *
 
+      - name: Package (zip — windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/gforce-node.exe" dist/
+          Copy-Item "target/${{ matrix.target }}/release/gforce-node-daemon.exe" dist/
+          Compress-Archive -Path dist/* -DestinationPath "gforce-node-${{ matrix.platform }}.zip"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: gforce-node-${{ matrix.platform }}
-          path: gforce-node-${{ matrix.platform }}.tar.gz
+          path: gforce-node-${{ matrix.platform }}.${{ matrix.archive }}
 
   release:
     needs: build
@@ -69,5 +92,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: gforce-node-*.tar.gz
+          files: |
+            gforce-node-*.tar.gz
+            gforce-node-*.zip
           generate_release_notes: true

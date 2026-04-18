@@ -24,11 +24,20 @@ fn dirs_home() -> PathBuf {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
-    /// GForce server URL (e.g., "gforce.nearminds.org")
+    /// Gforce server URL (e.g., "gforce.nearminds.org")
     pub server: String,
 
-    /// Permanent node secret (exchanged during registration)
+    /// Permanent node auth token. Presented as `Authorization: Bearer`
+    /// on every heartbeat. Only the SHA-256 hash is stored server-side.
     pub node_token: String,
+
+    /// Server-assigned node UUID (returned by /nodes/enroll).
+    #[serde(default)]
+    pub node_id: Option<String>,
+
+    /// Server-assigned infrastructure UUID (returned by /nodes/enroll).
+    #[serde(default)]
+    pub infrastructure_id: Option<String>,
 
     /// Workspace root for sandboxed file operations
     #[serde(default = "default_workspace_root_str")]
