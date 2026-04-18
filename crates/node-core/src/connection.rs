@@ -1,6 +1,6 @@
 //! WebSocket connection manager with auto-reconnect.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -110,7 +110,7 @@ async fn connect_and_run(
         system_info: Some(system_info.clone()),
     };
     let auth_json = serde_json::to_string(&auth)?;
-    write.send(Message::Text(auth_json.into())).await?;
+    write.send(Message::Text(auth_json)).await?;
 
     tracing::info!("Connected and authenticated");
     let _ = event_tx.send(ConnectionEvent::Connected).await;
@@ -159,7 +159,7 @@ async fn connect_and_run(
                 match out {
                     Some(OutboundMessage::Json(value)) => {
                         let text = serde_json::to_string(&value)?;
-                        write.send(Message::Text(text.into())).await?;
+                        write.send(Message::Text(text)).await?;
                     }
                     None => {
                         // Sender dropped
