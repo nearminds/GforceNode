@@ -18,6 +18,16 @@ name: Release gforce-node
 on:
   push:
     tags: ["v*"]
+  # Also expose a manual trigger so `cut-release.yml` can dispatch this
+  # workflow against an existing tag. Required because pushes performed
+  # by the default GITHUB_TOKEN don't trigger downstream workflows
+  # (GitHub's recursion guard) — we found this the hard way on v0.1.0.
+  # The dispatch input is the tag name, e.g. "v0.1.0".
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build a release for (e.g. v0.1.0). Must already exist."
+        required: true
 
 permissions:
   contents: write
@@ -57,6 +67,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # On workflow_dispatch the runner default-checks-out the
+          # workflow's ref (main); we want the tag's commit so the build
+          # reflects what the release advertises.
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -164,6 +179,16 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve tag
+        id: tag
+        # On `push: tags`, GITHUB_REF_NAME is the tag (e.g. "v0.1.0").
+        # On `workflow_dispatch`, the runner ran on the default branch,
+        # so we need the explicit input. Pick whichever is set.
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Operating on tag: $tag"
+
       - name: Detect prerelease
         id: detect_prerelease
         # If the tag has a `-rc.N`, `-beta.N`, or `-alpha.N` suffix, mark
@@ -171,7 +196,7 @@ jobs:
         # NOT promoting it to `releases/latest`, which is exactly what we
         # want — `curl|sh` users should never auto-pull an RC.
         run: |
-          tag="${GITHUB_REF_NAME}"
+          tag="${{ steps.tag.outputs.tag }}"
           if [[ "$tag" =~ -(rc|beta|alpha)\.[0-9]+$ ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "Tag $tag detected as prerelease."
@@ -183,6 +208,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
           files: |
             gforce-node-*.tar.gz
             gforce-node-*.zip
@@ -203,7 +229,7 @@ jobs:
         if: steps.detect_prerelease.outputs.prerelease == 'false'
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="${{ steps.tag.outputs.tag }}"
           repo="${{ github.repository }}"
           urls=(
             "https://github.com/$repo/releases/download/$tag/gforce-node-linux-x86_64.tar.gz"
