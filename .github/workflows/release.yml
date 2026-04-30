@@ -1,5 +1,20 @@
 name: Release gforce-node
 
+# Why this workflow does what it does
+# -----------------------------------
+# - Triggers only on `v*` tags. The companion `cut-release.yml` workflow
+#   creates those tags from CI so the audit trail is uniform.
+# - Builds for 6 platforms in parallel (Linux/macOS/Windows × x86_64/aarch64).
+# - Emits a `sha256sums.txt` alongside the binaries so install scripts can
+#   verify the download — the original failure mode that motivated this
+#   redesign was tar choking on a 9-byte 404 body, which a checksum check
+#   would have caught immediately and reported as "not what we expected".
+# - Marks pre-release tags (`-rc.N`, `-beta.N`, `-alpha.N`) as GitHub
+#   prereleases so `releases/latest` doesn't auto-promote them. Customers
+#   running the curl|sh installer should never pull a release candidate.
+# - After upload, smokes the public `releases/latest/download/...` URL to
+#   confirm the install path actually works before the workflow goes green.
+
 on:
   push:
     tags: ["v*"]
@@ -10,6 +25,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
@@ -47,11 +63,25 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Per-target cache so each matrix leg has its own warm cache.
+          # Without this, all six legs fight over one cache entry and
+          # cold-loads dominate the wall time of a release.
+          key: ${{ matrix.target }}
+
       - name: Install cross-compilation tools (Linux aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Configure linker for Linux aarch64
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p .cargo
+          echo '[target.aarch64-unknown-linux-gnu]' >> .cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
@@ -74,11 +104,38 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/gforce-node-daemon.exe" dist/
           Compress-Archive -Path dist/* -DestinationPath "gforce-node-${{ matrix.platform }}.zip"
 
+      - name: Compute SHA256 (unix)
+        # Per-asset checksum line, written into a file we'll merge into a
+        # single sha256sums.txt during the release job. Format matches
+        # what `sha256sum -c` and `shasum -a 256 -c` both expect.
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          asset="gforce-node-${{ matrix.platform }}.tar.gz"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$asset" > "${asset}.sha256"
+          else
+            shasum -a 256 "$asset" > "${asset}.sha256"
+          fi
+          cat "${asset}.sha256"
+
+      - name: Compute SHA256 (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $asset = "gforce-node-${{ matrix.platform }}.zip"
+          $hash  = (Get-FileHash -Algorithm SHA256 -Path $asset).Hash.ToLower()
+          # GNU coreutils format: "<hash>  <filename>"
+          "$hash  $asset" | Out-File -Encoding ascii "${asset}.sha256"
+          Get-Content "${asset}.sha256"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: gforce-node-${{ matrix.platform }}
-          path: gforce-node-${{ matrix.platform }}.${{ matrix.archive }}
+          path: |
+            gforce-node-${{ matrix.platform }}.${{ matrix.archive }}
+            gforce-node-${{ matrix.platform }}.${{ matrix.archive }}.sha256
 
   release:
     needs: build
@@ -89,10 +146,91 @@ jobs:
         with:
           merge-multiple: true
 
+      - name: Combine per-asset checksums into sha256sums.txt
+        # One file with one line per binary, ordered alphabetically so the
+        # output is deterministic across runs (helps reviewers diff two
+        # releases). The install scripts grep this for their platform's
+        # line; format MUST stay GNU coreutils-compatible.
+        run: |
+          ls -1 gforce-node-*.sha256 | sort | xargs cat > sha256sums.txt
+          echo "==== sha256sums.txt ===="
+          cat sha256sums.txt
+          echo "========================"
+          # Sanity: we must have all 6 platforms or someone dropped a leg.
+          want=6
+          got=$(wc -l < sha256sums.txt)
+          if [ "$got" -ne "$want" ]; then
+            echo "::error::Expected $want checksum lines, got $got. A matrix leg failed silently."
+            exit 1
+          fi
+
+      - name: Detect prerelease
+        id: detect_prerelease
+        # If the tag has a `-rc.N`, `-beta.N`, or `-alpha.N` suffix, mark
+        # the GitHub release as prerelease. That has the side effect of
+        # NOT promoting it to `releases/latest`, which is exactly what we
+        # want — `curl|sh` users should never auto-pull an RC.
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" =~ -(rc|beta|alpha)\.[0-9]+$ ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "Tag $tag detected as prerelease."
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Tag $tag detected as stable release."
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             gforce-node-*.tar.gz
             gforce-node-*.zip
+            sha256sums.txt
           generate_release_notes: true
+          prerelease: ${{ steps.detect_prerelease.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+
+      - name: Smoke-test public download URL
+        # The original failure mode this whole redesign was motivated by
+        # was a 404 that returned the literal text "Not Found" — tar
+        # choked on it because the install script didn't sanity-check
+        # what it had downloaded. We catch that class of regression here
+        # by hitting the *exact* URL the install script will hit and
+        # confirming it returns a real archive (not a 9-byte error page).
+        # This step only runs for stable releases — prereleases don't
+        # promote to `releases/latest/download/`.
+        if: steps.detect_prerelease.outputs.prerelease == 'false'
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          repo="${{ github.repository }}"
+          urls=(
+            "https://github.com/$repo/releases/download/$tag/gforce-node-linux-x86_64.tar.gz"
+            "https://github.com/$repo/releases/download/$tag/gforce-node-darwin-aarch64.tar.gz"
+            "https://github.com/$repo/releases/download/$tag/sha256sums.txt"
+            "https://github.com/$repo/releases/latest/download/gforce-node-linux-x86_64.tar.gz"
+            "https://github.com/$repo/releases/latest/download/gforce-node-darwin-aarch64.tar.gz"
+            "https://github.com/$repo/releases/latest/download/sha256sums.txt"
+          )
+          # GitHub release CDN can take a few seconds to propagate after
+          # action-gh-release finishes uploading. Retry a handful of times
+          # before declaring failure.
+          for url in "${urls[@]}"; do
+            ok=0
+            for attempt in 1 2 3 4 5; do
+              code=$(curl -sSL -o /tmp/probe -w "%{http_code}" "$url" || echo "000")
+              size=$(stat -c%s /tmp/probe 2>/dev/null || stat -f%z /tmp/probe)
+              if [ "$code" = "200" ] && [ "$size" -gt 1024 ]; then
+                echo "OK  $url  (HTTP $code, ${size} bytes)"
+                ok=1
+                break
+              fi
+              echo "WAIT $url  (HTTP $code, ${size} bytes) — retry $attempt"
+              sleep 5
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::URL did not become healthy: $url (HTTP $code, ${size} bytes)"
+              exit 1
+            fi
+          done
