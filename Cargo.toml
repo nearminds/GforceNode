@@ -10,7 +10,11 @@ resolver = "2"
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+# rustls-tls-native-roots: pure-Rust TLS that reads the OS root store.
+# Switched from native-tls (OpenSSL) so cross-compiling for Linux
+# aarch64 doesn't need a cross-arch OpenSSL toolchain. reqwest already
+# uses rustls; this keeps the TLS stack consistent across both crates.
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 
 # Serialization
