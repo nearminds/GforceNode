@@ -40,7 +40,12 @@ on:
 
 permissions:
   contents: write
-  actions: read
+  # `actions: write` is required to dispatch release.yml after the tag
+  # push (the workaround for GitHub's recursion guard on GITHUB_TOKEN
+  # tag pushes). Without it, `gh workflow run` from inside the runner
+  # gets "Resource not accessible by integration" — discovered while
+  # cutting v0.1.1.
+  actions: write
 
 jobs:
   cut:
