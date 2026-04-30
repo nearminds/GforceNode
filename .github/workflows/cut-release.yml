@@ -1,0 +1,128 @@
+name: Cut release
+
+# Why this workflow exists
+# ------------------------
+# `release.yml` only fires on `push: tags: ["v*"]`. That contract is good
+# (tag is the source of truth for what shipped), but it's also error-prone
+# to drive from a developer laptop:
+#   - Forgetting to push the tag after creating it.
+#   - Tagging the wrong commit.
+#   - Tagging from a branch that has unmerged work.
+#   - Not noticing CI was red on the commit being tagged.
+#
+# This workflow puts the tag-cutting step in CI itself. Run it from the
+# Actions tab, supply a version, and it will:
+#
+#   1. Validate the version is well-formed semver and doesn't already exist.
+#   2. Refuse to release from a non-`main` ref (override available, but
+#      noisy in the audit log).
+#   3. Refuse to release if CI on the ref isn't green (override available
+#      for emergencies).
+#   4. Create + push the annotated tag from the chosen ref.
+#
+# The push then triggers `release.yml` to do the actual build + upload.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to create (e.g. v0.1.0, v0.2.0-rc.1). Must start with 'v'."
+        required: true
+      ref:
+        description: "Git ref to tag from (default: main). Override only when you know why."
+        required: false
+        default: "main"
+      allow_red_ci:
+        description: "Cut even if CI on the ref is red. Use for hotfixes only."
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version format
+        # SemVer with optional pre-release suffix (-rc.N, -beta.N, -alpha.N).
+        # Anything outside this is rejected so we don't ship "v0.1" or
+        # "release-1" by accident — both would break the install script's
+        # tag-pattern assumptions.
+        run: |
+          version="${{ inputs.version }}"
+          if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(rc|beta|alpha)\.[0-9]+)?$ ]]; then
+            echo "::error::Version $version is not in the form vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-(rc|beta|alpha).N"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        id: validate
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Refuse if tag already exists
+        # Existing tags must never be overwritten — the install script's
+        # `releases/latest/download/...` URL caches by tag, so re-using a
+        # tag for different binaries silently breaks any agent that
+        # already pinned that version.
+        run: |
+          version="${{ inputs.version }}"
+          if git rev-parse -q --verify "refs/tags/$version" > /dev/null; then
+            echo "::error::Tag $version already exists. Pick a new version."
+            exit 1
+          fi
+          if gh release view "$version" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "::error::Release $version already published on GitHub. Pick a new version."
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Warn if cutting from non-main ref
+        if: inputs.ref != 'main'
+        run: |
+          echo "::warning::Cutting from ref '${{ inputs.ref }}' instead of 'main'. Make sure that's intentional."
+
+      - name: Check CI status on ref
+        # We cut from the latest commit on the chosen ref, so the
+        # appropriate signal is "the CI run for that commit was green".
+        # Anything else is overridable but loud.
+        if: inputs.allow_red_ci != true
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "Checking CI status for $sha…"
+          conclusion=$(gh run list \
+            --workflow=ci.yml \
+            --branch="${{ inputs.ref }}" \
+            --limit 1 \
+            --json conclusion,headSha,event,status \
+            --jq '.[] | select(.headSha == "'"$sha"'") | .conclusion' \
+            | head -n1)
+          if [ -z "$conclusion" ]; then
+            echo "::error::No CI run found for $sha on ${{ inputs.ref }}. Either CI hasn't run yet or the ref doesn't match. Set allow_red_ci=true to override."
+            exit 1
+          fi
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::CI conclusion for $sha is '$conclusion', not 'success'. Set allow_red_ci=true if this is a known-good hotfix."
+            exit 1
+          fi
+          echo "CI green for $sha — proceeding."
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create + push annotated tag
+        # An *annotated* tag (-a) records the tagger and a message —
+        # lightweight tags would work but lose that audit trail.
+        # The push triggers release.yml automatically.
+        run: |
+          version="${{ inputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$version" -m "Release $version (cut from ${{ inputs.ref }} by ${{ github.actor }})"
+          git push origin "$version"
+          echo "Pushed $version. Watch release.yml: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/release.yml"

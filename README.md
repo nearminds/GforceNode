@@ -19,7 +19,28 @@ jobs from the Gforce control plane.
 curl -sSL https://gforce.nearminds.org/install.sh | TOKEN=<enrollment-token> sh
 ```
 
-Windows support and MSI installer: in progress. See tracking issue.
+Pin a specific version:
+
+```sh
+curl -sSL https://gforce.nearminds.org/install.sh | GFORCE_VERSION=v0.1.0 TOKEN=<token> sh
+```
+
+The installer verifies SHA256 against the published `sha256sums.txt`
+before extracting. Set `GFORCE_SKIP_VERIFY=1` to bypass (not recommended
+in production).
+
+Windows:
+
+```powershell
+$env:TOKEN = "<enrollment-token>"
+iwr https://gforce.nearminds.org/install.ps1 -useb | iex
+```
+
+## Releasing
+
+See [RELEASING.md](./RELEASING.md). Releases are cut from the
+[Cut release](https://github.com/nearminds/GforceNode/actions/workflows/cut-release.yml)
+workflow — there's no manual `git tag && git push` step.
 
 ## Relationship to Gforce
 

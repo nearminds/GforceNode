@@ -67,6 +67,45 @@ try {
     Write-Host "Downloading..."
     Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
 
+    # Sanity-check the size before handing the file to Expand-Archive.
+    # GitHub returns a tiny error page when an asset doesn't exist, and
+    # the user gets an opaque "not a valid zip" later. The smallest real
+    # zip we ship is several MB; 1 KB is a generous floor.
+    $size = (Get-Item $archive).Length
+    if ($size -lt 1024) {
+        $head = [System.IO.File]::ReadAllText($archive)
+        throw "Downloaded archive is only $size bytes — that's not a real zip. Body: $($head.Substring(0, [Math]::Min(200, $head.Length)))"
+    }
+
+    # SHA256 verification — same rationale as install.sh. Skipping is
+    # supported via $env:GFORCE_SKIP_VERIFY = "1" but loud.
+    if ($env:GFORCE_SKIP_VERIFY -eq "1") {
+        Write-Host "Skipping SHA256 verification (GFORCE_SKIP_VERIFY=1)."
+    } else {
+        $sumsUrl = if ($Version -eq "latest") {
+            "https://github.com/$Repo/releases/latest/download/sha256sums.txt"
+        } else {
+            "https://github.com/$Repo/releases/download/$Version/sha256sums.txt"
+        }
+        $sumsFile = Join-Path $tmp "sha256sums.txt"
+        Write-Host "Verifying SHA256..."
+        try {
+            Invoke-WebRequest -Uri $sumsUrl -OutFile $sumsFile -UseBasicParsing
+        } catch {
+            throw "sha256sums.txt could not be fetched from $sumsUrl. Either this release predates checksum support (re-cut it), or set `$env:GFORCE_SKIP_VERIFY = '1' to skip."
+        }
+        $expected = (Select-String -Path $sumsFile -Pattern "gforce-node-$platform.zip" |
+            Select-Object -First 1).Line.Split()[0]
+        if (-not $expected) {
+            throw "No checksum line for gforce-node-$platform.zip in sha256sums.txt"
+        }
+        $actual = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLower()
+        if ($actual -ne $expected.ToLower()) {
+            throw "SHA256 mismatch. expected=$expected actual=$actual"
+        }
+        Write-Host "Checksum OK ($actual)."
+    }
+
     Write-Host "Extracting..."
     Expand-Archive -Path $archive -DestinationPath $tmp -Force
 
