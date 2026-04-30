@@ -118,11 +118,26 @@ jobs:
       - name: Create + push annotated tag
         # An *annotated* tag (-a) records the tagger and a message —
         # lightweight tags would work but lose that audit trail.
-        # The push triggers release.yml automatically.
         run: |
           version="${{ inputs.version }}"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$version" -m "Release $version (cut from ${{ inputs.ref }} by ${{ github.actor }})"
           git push origin "$version"
-          echo "Pushed $version. Watch release.yml: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/release.yml"
+          echo "Pushed $version."
+
+      - name: Dispatch release.yml against the new tag
+        # GitHub's recursion guard means a tag push from GITHUB_TOKEN
+        # does NOT trigger workflows that listen on `push: tags`. To
+        # actually build the release we have to dispatch release.yml
+        # explicitly. This works because release.yml also accepts a
+        # workflow_dispatch trigger with a `tag` input.
+        run: |
+          version="${{ inputs.version }}"
+          gh workflow run release.yml \
+            --repo "${{ github.repository }}" \
+            --ref "$version" \
+            -f tag="$version"
+          echo "Dispatched release.yml for $version. Watch: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/release.yml"
+        env:
+          GH_TOKEN: ${{ github.token }}
