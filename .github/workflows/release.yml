@@ -239,12 +239,22 @@ jobs:
             "https://github.com/$repo/releases/latest/download/gforce-node-darwin-aarch64.tar.gz"
             "https://github.com/$repo/releases/latest/download/sha256sums.txt"
           )
-          # GitHub release CDN can take a few seconds to propagate after
-          # action-gh-release finishes uploading. Retry a handful of times
-          # before declaring failure.
+          # GitHub release CDN propagation is empirically 30-60s after
+          # action-gh-release prints "Created release" — the release
+          # object is queryable via API immediately, but the public
+          # download URLs (especially `releases/latest/download/`) lag.
+          # v0.1.2 cleared its 5x5s retry budget and still 404'd despite
+          # being a perfect publish, so we sleep up front and then have
+          # a generous retry budget on top.
+          echo "Waiting 45s for CDN propagation before probing…"
+          sleep 45
           for url in "${urls[@]}"; do
             ok=0
-            for attempt in 1 2 3 4 5; do
+            # 12 attempts × 10s = 2 min ceiling. Combined with the 45s
+            # warm-up, we'll wait up to ~3 min per URL — long enough to
+            # absorb the worst CDN latency we've observed without
+            # papering over a real upload failure.
+            for attempt in $(seq 1 12); do
               code=$(curl -sSL -o /tmp/probe -w "%{http_code}" "$url" || echo "000")
               size=$(stat -c%s /tmp/probe 2>/dev/null || stat -f%z /tmp/probe)
               if [ "$code" = "200" ] && [ "$size" -gt 1024 ]; then
@@ -253,7 +263,7 @@ jobs:
                 break
               fi
               echo "WAIT $url  (HTTP $code, ${size} bytes) — retry $attempt"
-              sleep 5
+              sleep 10
             done
             if [ "$ok" -ne 1 ]; then
               echo "::error::URL did not become healthy: $url (HTTP $code, ${size} bytes)"
