@@ -231,13 +231,21 @@ jobs:
           set -euo pipefail
           tag="${{ steps.tag.outputs.tag }}"
           repo="${{ github.repository }}"
+          # Format: "min_bytes|url" — min_bytes is the per-URL floor.
+          # Binary archives are MB-sized; the 1 KB floor catches GitHub
+          # error pages without false-flagging a real download.
+          # sha256sums.txt is ~80 bytes per platform * 6 platforms ≈
+          # 480 bytes, so a 256-byte floor catches a truncated upload
+          # without flagging the legitimate small file. v0.1.3's release
+          # smoke step failed against a perfectly-published sha256sums
+          # because we naively used 1 KB for every URL.
           urls=(
-            "https://github.com/$repo/releases/download/$tag/gforce-node-linux-x86_64.tar.gz"
-            "https://github.com/$repo/releases/download/$tag/gforce-node-darwin-aarch64.tar.gz"
-            "https://github.com/$repo/releases/download/$tag/sha256sums.txt"
-            "https://github.com/$repo/releases/latest/download/gforce-node-linux-x86_64.tar.gz"
-            "https://github.com/$repo/releases/latest/download/gforce-node-darwin-aarch64.tar.gz"
-            "https://github.com/$repo/releases/latest/download/sha256sums.txt"
+            "1024|https://github.com/$repo/releases/download/$tag/gforce-node-linux-x86_64.tar.gz"
+            "1024|https://github.com/$repo/releases/download/$tag/gforce-node-darwin-aarch64.tar.gz"
+            "256|https://github.com/$repo/releases/download/$tag/sha256sums.txt"
+            "1024|https://github.com/$repo/releases/latest/download/gforce-node-linux-x86_64.tar.gz"
+            "1024|https://github.com/$repo/releases/latest/download/gforce-node-darwin-aarch64.tar.gz"
+            "256|https://github.com/$repo/releases/latest/download/sha256sums.txt"
           )
           # GitHub release CDN propagation is empirically 30-60s after
           # action-gh-release prints "Created release" — the release
@@ -248,7 +256,9 @@ jobs:
           # a generous retry budget on top.
           echo "Waiting 45s for CDN propagation before probing…"
           sleep 45
-          for url in "${urls[@]}"; do
+          for entry in "${urls[@]}"; do
+            min_bytes="${entry%%|*}"
+            url="${entry#*|}"
             ok=0
             # 12 attempts × 10s = 2 min ceiling. Combined with the 45s
             # warm-up, we'll wait up to ~3 min per URL — long enough to
@@ -257,16 +267,16 @@ jobs:
             for attempt in $(seq 1 12); do
               code=$(curl -sSL -o /tmp/probe -w "%{http_code}" "$url" || echo "000")
               size=$(stat -c%s /tmp/probe 2>/dev/null || stat -f%z /tmp/probe)
-              if [ "$code" = "200" ] && [ "$size" -gt 1024 ]; then
-                echo "OK  $url  (HTTP $code, ${size} bytes)"
+              if [ "$code" = "200" ] && [ "$size" -gt "$min_bytes" ]; then
+                echo "OK  $url  (HTTP $code, ${size} bytes, min ${min_bytes})"
                 ok=1
                 break
               fi
-              echo "WAIT $url  (HTTP $code, ${size} bytes) — retry $attempt"
+              echo "WAIT $url  (HTTP $code, ${size} bytes, min ${min_bytes}) — retry $attempt"
               sleep 10
             done
             if [ "$ok" -ne 1 ]; then
-              echo "::error::URL did not become healthy: $url (HTTP $code, ${size} bytes)"
+              echo "::error::URL did not become healthy: $url (HTTP $code, ${size} bytes, min ${min_bytes})"
               exit 1
             fi
           done
